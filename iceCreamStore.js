@@ -8,7 +8,7 @@ let iceCreamFlavors = [
 { name: "Raspberry", type: "Fruit", price: 1},
 ];
 let transactions = []
-
+// 주석
 transactions.push({ scoops: ["Chocolate", "Vanilla", "Mint Chip"], total: 5.5 })
 transactions.push({ scoops: ["Raspberry", "StrawBerry"], total: 2 })
 transactions.push({ scoops: ["Vanilla", "Vanilla"], total: 4 })
