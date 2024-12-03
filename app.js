@@ -8,68 +8,308 @@ function loadTexture(path) {
     });
 }
 
-window.onload = async () => {
-    const canvas = document.getElementById("myCanvas");
-    const ctx = canvas.getContext("2d");
+class EventEmitter {
+    constructor() {
+        this.listeners = {};
+    }
+    on(message, listener) {
+        if (!this.listeners[message]) {
+            this.listeners[message] = [];
+        }
+        this.listeners[message].push(listener);
+    }
+    emit(message, payload = null) {
+        if (this.listeners[message]) {
+            this.listeners[message].forEach((l) => l(message, payload));
+        }
+    }
+}
 
-    // Load images
-    const spaceImg = await loadTexture('assets/starBackground.png'); // 배경 이미지 (우주)
-    const heroImg = await loadTexture('assets/player.png');
-    const enemyImg = await loadTexture('assets/enemyShip.png');
+class GameObject {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.dead = false;
+        this.type = "";
+        this.width = 0;
+        this.height = 0;
+        this.img = undefined;
+    }
+    rectFromGameObject() {
+        return {
+            top: this.y,
+            left: this.x,
+            bottom: this.y + this.height,
+            right: this.x + this.width,
+        };
+    }
+    draw(ctx) {
+        ctx.drawImage(this.img, this.x, this.y, this.width, this.height);
+    }
+}
 
-    // Create background pattern
-    const spacePattern = ctx.createPattern(spaceImg, 'repeat'); // 반복 패턴 생성
-    ctx.fillStyle = spacePattern;
-    ctx.fillRect(0, 0, canvas.width, canvas.height); // 배경 채우기
+class HeroSub extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = 33;
+        this.height = 25;
+        this.type = "HeroSub";
+        this.lastFireTime = 0; // 마지막 발사 시간
+    }
 
-    // Draw main hero spaceship
-    const heroX = canvas.width / 2 - 45; // Main spaceship X position
-    const heroY = canvas.height - (canvas.height / 4); // Main spaceship Y position
-    ctx.drawImage(heroImg, heroX, heroY);
+    fire() {
+        const now = Date.now();
+        const fireDelay = 500; // 0.5초 간격
 
-    // Draw smaller left spaceship
-    const smallWidth = heroImg.width * 0.5; // Scale width to 50%
-    const smallHeight = heroImg.height * 0.5; // Scale height to 50%
-    const leftX = heroX - smallWidth - 20; // Position to the left of main spaceship
-    const leftY = heroY + heroImg.height / 4; // Slightly lower than main spaceship
-    ctx.drawImage(heroImg, leftX, leftY, smallWidth, smallHeight);
+        // 처음은 약간 천천히, 이후는 지속적으로 0.5초 간격
+        if (now - this.lastFireTime >= fireDelay) {
+            gameObjects.push(new Laser(this.x + this.width / 2 - 4, this.y - 10));
+            this.lastFireTime = now; // 마지막 발사 시간 업데이트
+        }
+    }
+}
 
-    // Draw smaller right spaceship
-    const rightX = heroX + heroImg.width + 20; // Position to the right of main spaceship
-    ctx.drawImage(heroImg, rightX, leftY, smallWidth, smallHeight);
+class Hero extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = 99;
+        this.height = 75;
+        this.type = "Hero";
+        this.cooldown = 0;
+    }
 
+    fire() {
+        if (this.canFire()) {
+            gameObjects.push(new Laser(this.x + 45, this.y - 10));
+            this.cooldown = 500;
+            let id = setInterval(() => {
+                if (this.cooldown > 0) {
+                    this.cooldown -= 100;
+                } else {
+                    clearInterval(id);
+                }
+            }, 100);
+        }
+    }
 
-    // Create and draw enemies in reverse pyramid
-    createEnemies2(ctx, canvas, enemyImg);
+    canFire() {
+        return this.cooldown === 0;
+    }
+}
+
+class Laser extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = 9;
+        this.height = 33;
+        this.type = "Laser";
+        this.img = laserImg;
+        let id = setInterval(() => {
+            if (this.y > 0) {
+                this.y -= 15;
+            } else {
+                this.dead = true;
+                clearInterval(id);
+            }
+        }, 100);
+    }
+}
+
+class Enemy extends GameObject {
+    constructor(x, y) {
+        super(x, y);
+        this.width = 98;
+        this.height = 50;
+        this.type = "Enemy";
+        let id = setInterval(() => {
+            if (this.y < canvas.height - this.height) {
+                this.y += 5;
+            } else {
+                clearInterval(id);
+            }
+        }, 300);
+    }
+}
+
+class Explosion extends GameObject {
+    constructor(x, y, img) {
+        super(x, y);
+        this.width = 90;
+        this.height = 90;
+        this.type = "Explosion";
+        this.img = img;
+
+        // 500ms 후 폭발 제거
+        setTimeout(() => {
+            this.dead = true;
+        }, 100);
+    }
+}
+
+const Messages = {
+    KEY_EVENT_UP: "KEY_EVENT_UP",
+    KEY_EVENT_DOWN: "KEY_EVENT_DOWN",
+    KEY_EVENT_LEFT: "KEY_EVENT_LEFT",
+    KEY_EVENT_RIGHT: "KEY_EVENT_RIGHT",
+    KEY_EVENT_SPACE: "KEY_EVENT_SPACE",
+    COLLISION_ENEMY_LASER: "COLLISION_ENEMY_LASER",
 };
 
-function createEnemies(ctx, canvas, enemyImg) {
+let heroImg,
+    enemyImg,
+    laserImg,
+    explosionImg,
+    canvas,
+    ctx,
+    gameObjects = [],
+    hero,
+    heroSub1,
+    heroSub2,
+    eventEmitter = new EventEmitter();
+
+window.addEventListener("keyup", (evt) => {
+    if (evt.key === "ArrowUp") {
+        eventEmitter.emit(Messages.KEY_EVENT_UP);
+    } else if (evt.key === "ArrowDown") {
+        eventEmitter.emit(Messages.KEY_EVENT_DOWN);
+    } else if (evt.key === "ArrowLeft") {
+        eventEmitter.emit(Messages.KEY_EVENT_LEFT);
+    } else if (evt.key === "ArrowRight") {
+        eventEmitter.emit(Messages.KEY_EVENT_RIGHT);
+    } else if (evt.keyCode === 32) {
+        eventEmitter.emit(Messages.KEY_EVENT_SPACE);
+    }
+});
+
+function intersectRect(r1, r2) {
+    return !(
+        r2.left > r1.right ||
+        r2.right < r1.left ||
+        r2.top > r1.bottom ||
+        r2.bottom < r1.top
+    );
+}
+
+function updateGameObjects() {
+    const enemies = gameObjects.filter((go) => go.type === "Enemy");
+    const lasers = gameObjects.filter((go) => go.type === "Laser");
+
+    const heroSubs = gameObjects.filter((go) => go.type === "HeroSub");
+    heroSubs.forEach((sub) => sub.fire());
+
+    lasers.forEach((l) => {
+        enemies.forEach((m) => {
+            if (intersectRect(l.rectFromGameObject(), m.rectFromGameObject())) {
+                // 충돌 발생
+                eventEmitter.emit(Messages.COLLISION_ENEMY_LASER, {
+                    first: l,
+                    second: m,
+                });
+
+                // 폭발 생성
+                const explosion = new Explosion(m.x, m.y, explosionImg);
+                gameObjects.push(explosion);
+
+                l.dead = true;
+                m.dead = true;
+            }
+        });
+    });
+
+    gameObjects = gameObjects.filter((go) => !go.dead);
+}
+
+function createEnemies() {
     const MONSTER_TOTAL = 5;
-    const MONSTER_WIDTH = MONSTER_TOTAL * enemyImg.width;
+    const MONSTER_WIDTH = MONSTER_TOTAL * 98;
     const START_X = (canvas.width - MONSTER_WIDTH) / 2;
     const STOP_X = START_X + MONSTER_WIDTH;
-
-    for (let x = START_X; x < STOP_X; x += enemyImg.width) {
-        for (let y = 0; y < enemyImg.height * 5; y += enemyImg.height) {
-            ctx.drawImage(enemyImg, x, y);
+    for (let x = START_X; x < STOP_X; x += 98) {
+        for (let y = 0; y < 50 * 5; y += 50) {
+            const enemy = new Enemy(x, y);
+            enemy.img = enemyImg;
+            gameObjects.push(enemy);
         }
     }
 }
 
-function createEnemies2(ctx, canvas, enemyImg) {
-    const ROWS = 5; // 피라미드의 행 개수
-    const START_Y = 0; // 첫 번째 행의 Y 좌표
-    const GAP = 2; // 우주선 사이 간격
+function createHero() {
+    hero = new Hero(canvas.width / 2 - 45, canvas.height - canvas.height / 4);
 
-    for (let row = 0; row < ROWS; row++) {
-        const numEnemies = ROWS - row; // 현재 행의 우주선 개수 (맨 위부터 5, 4, 3, 2, 1)
-        const rowWidth = numEnemies * enemyImg.width + (numEnemies - 1) * GAP; // 현재 행의 전체 폭
-        const startX = (canvas.width - rowWidth) / 2; // 현재 행의 시작 X 좌표
+    heroSub1 = new HeroSub(
+        canvas.width / 2 + 75,
+        canvas.height - canvas.height / 4 + 30
+    );
 
-        for (let col = 0; col < numEnemies; col++) {
-            const x = startX + col * (enemyImg.width + GAP); // 현재 우주선의 X 좌표
-            const y = START_Y + row * (enemyImg.height + GAP); // 현재 행의 Y 좌표
-            ctx.drawImage(enemyImg, x, y); // 우주선 그리기
-        }
-    }
+    heroSub2 = new HeroSub(
+        canvas.width / 2 - 100,
+        canvas.height - canvas.height / 4 + 30
+    );
+
+    hero.img = heroImg;
+    heroSub1.img = heroImg;
+    heroSub2.img = heroImg;
+
+    gameObjects.push(hero, heroSub1, heroSub2);
 }
+
+function drawGameObjects(ctx) {
+    gameObjects.forEach((go) => go.draw(ctx));
+}
+
+window.onload = async () => {
+    canvas = document.getElementById("myCanvas");
+    ctx = canvas.getContext("2d");
+    heroImg = await loadTexture("assets/player.png");
+    enemyImg = await loadTexture("assets/enemyShip.png");
+    laserImg = await loadTexture("assets/laserRed.png");
+    explosionImg = await loadTexture("assets/laserGreenShot.png"); // 폭발 이미지 로드
+
+    createEnemies(ctx, canvas, enemyImg);
+
+    function initGame() {
+        gameObjects = [];
+        createEnemies();
+        createHero();
+
+        eventEmitter.on(Messages.KEY_EVENT_UP, () => {
+            hero.y -= 5;
+            heroSub1.y -= 5;
+            heroSub2.y -= 5;
+        });
+        eventEmitter.on(Messages.KEY_EVENT_DOWN, () => {
+            hero.y += 5;
+            heroSub1.y += 5;
+            heroSub2.y += 5;
+        });
+        eventEmitter.on(Messages.KEY_EVENT_LEFT, () => {
+            hero.x -= 5;
+            heroSub1.x -= 5;
+            heroSub2.x -= 5;
+        });
+        eventEmitter.on(Messages.KEY_EVENT_RIGHT, () => {
+            hero.x += 5;
+            heroSub1.x += 5;
+            heroSub2.x += 5;
+        });
+        eventEmitter.on(Messages.KEY_EVENT_SPACE, () => {
+            if (hero.canFire()) {
+                hero.fire();
+            }
+        });
+
+        eventEmitter.on(Messages.COLLISION_ENEMY_LASER, (_, { first, second }) => {
+            first.dead = true;
+            second.dead = true;
+        });
+    }
+
+    initGame();
+    setInterval(() => {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawGameObjects(ctx);
+        updateGameObjects();
+    }, 100);
+};
